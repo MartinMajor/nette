@@ -248,7 +248,7 @@ class Configurator extends Object
 		}
 		$dir = $this->parameters['tempDir'] . '/cache';
 		if (!is_dir($dir)) {
-			mkdir($dir);
+			@mkdir($dir, 0777); // @ - directory may already exist
 		}
 		return $dir;
 	}
