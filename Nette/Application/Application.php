@@ -22,6 +22,9 @@ use Nette;
  */
 class Application extends Nette\Object
 {
+	/** @internal special parameter key */
+	const REQUEST_KEY = '_rid';
+
 	/** @var int */
 	public static $maxLoop = 20;
 
@@ -67,13 +70,21 @@ class Application extends Nette\Object
 	/** @var IRouter */
 	private $router;
 
+	/** @var Nette\Http\Session */
+	private $session;
 
-	public function __construct(IPresenterFactory $presenterFactory, IRouter $router, Nette\Http\IRequest $httpRequest, Nette\Http\IResponse $httpResponse)
+	/** @var Nette\Security\User */
+	private $user;
+
+
+	public function __construct(IPresenterFactory $presenterFactory, IRouter $router, Nette\Http\IRequest $httpRequest, Nette\Http\IResponse $httpResponse, Nette\Http\Session $session, Nette\Security\User $user)
 	{
 		$this->httpRequest = $httpRequest;
 		$this->httpResponse = $httpResponse;
 		$this->presenterFactory = $presenterFactory;
 		$this->router = $router;
+		$this->session = $session;
+		$this->user = $user;
 	}
 
 
@@ -118,6 +129,13 @@ class Application extends Nette\Object
 
 		} elseif (strcasecmp($request->getPresenterName(), $this->errorPresenter) === 0) {
 			throw new BadRequestException('Invalid request. Presenter is not achievable.');
+		}
+
+		if ($rid = $this->httpRequest->getQuery(self::REQUEST_KEY)) {
+			$storedRequest = $this->getStoredRequest($rid, $request);
+			if ($storedRequest) {
+				return $storedRequest;
+			}
 		}
 
 		try {
@@ -197,6 +215,63 @@ class Application extends Nette\Object
 	public function getPresenter()
 	{
 		return $this->presenter;
+	}
+
+
+	/********************* request serialization ****************d*g**/
+
+
+	/**
+	 * Stores current request to session.
+	 * @param  Request request
+	 * @param  mixed  optional expiration time
+	 * @return string key
+	 */
+	public function storeRequest(Request $request, $expiration = '+ 10 minutes')
+	{
+		$session = $this->session->getSection('Nette.Application/requests');
+		do {
+			$key = Nette\Utils\Random::generate(5);
+		} while (isset($session[$key]));
+
+		$session[$key] = array($this->user->getId(), $request);
+		$session->setExpiration($expiration, $key);
+		return $key;
+	}
+
+
+	/**
+	 * Loads stored request from session.
+	 * @param  string key
+	 * @param  Request current request
+	 * @return \Nette\Application\Request|NULL
+	 */
+	public function getStoredRequest($key, Request $currentRequest)
+	{
+		$session = $this->session->getSection('Nette.Application/requests');
+		if (!isset($session[$key]) || ($session[$key][0] !== NULL && $session[$key][0] !== $this->user->getId())) {
+			return NULL;
+		}
+		$request = clone $session[$key][1];
+
+		$params = $request->getParameters();
+
+		if ($request->getPresenterName() !== $currentRequest->getPresenterName()) {
+			$params[self::REQUEST_KEY] = $key;
+			$action = $params[Nette\Application\UI\Presenter::ACTION_KEY];
+			unset($params[Nette\Application\UI\Presenter::ACTION_KEY]);
+			$this->presenter->redirect(":$request->presenterName:$action", $params);
+		}
+
+		$request->setFlag(Request::RESTORED, TRUE);
+
+		$currentParams = $currentRequest->getParameters();
+		if (isset($currentParams[Nette\Application\UI\Presenter::FLASH_KEY])) {
+			$params[Nette\Application\UI\Presenter::FLASH_KEY] = $currentParams[Nette\Application\UI\Presenter::FLASH_KEY];
+		}
+		$request->setParameters($params);
+
+		return $request;
 	}
 
 

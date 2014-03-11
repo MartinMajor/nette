@@ -1069,14 +1069,7 @@ abstract class Presenter extends Control implements Application\IPresenter
 	 */
 	public function storeRequest($expiration = '+ 10 minutes')
 	{
-		$session = $this->session->getSection('Nette.Application/requests');
-		do {
-			$key = Nette\Utils\Random::generate(5);
-		} while (isset($session[$key]));
-
-		$session[$key] = array($this->user->getId(), $this->request);
-		$session->setExpiration($expiration, $key);
-		return $key;
+		return $this->application->storeRequest($this->request, $expiration);
 	}
 
 
@@ -1087,17 +1080,10 @@ abstract class Presenter extends Control implements Application\IPresenter
 	 */
 	public function restoreRequest($key)
 	{
-		$session = $this->session->getSection('Nette.Application/requests');
-		if (!isset($session[$key]) || ($session[$key][0] !== NULL && $session[$key][0] !== $this->user->getId())) {
-			return;
+		$request = $this->application->getStoredRequest($key, $this->request);
+		if ($request) {
+			$this->sendResponse(new Responses\ForwardResponse($request));
 		}
-		$request = clone $session[$key][1];
-		unset($session[$key]);
-		$request->setFlag(Application\Request::RESTORED, TRUE);
-		$params = $request->getParameters();
-		$params[self::FLASH_KEY] = $this->getParameter(self::FLASH_KEY);
-		$request->setParameters($params);
-		$this->sendResponse(new Responses\ForwardResponse($request));
 	}
 
 
@@ -1277,7 +1263,7 @@ abstract class Presenter extends Control implements Application\IPresenter
 	public function hasFlashSession()
 	{
 		return !empty($this->params[self::FLASH_KEY])
-			&& $this->session->hasSection('Nette.Application.Flash/' . $this->params[self::FLASH_KEY]);
+		&& $this->session->hasSection('Nette.Application.Flash/' . $this->params[self::FLASH_KEY]);
 	}
 
 
