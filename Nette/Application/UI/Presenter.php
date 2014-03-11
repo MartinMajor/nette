@@ -43,6 +43,7 @@ abstract class Presenter extends Control implements Application\IPresenter
 	const SIGNAL_KEY = 'do',
 		ACTION_KEY = 'action',
 		FLASH_KEY = '_fid',
+		REQUEST_KEY = '_rid',
 		DEFAULT_ACTION = 'default';
 
 	/** @var int */
@@ -167,8 +168,16 @@ abstract class Presenter extends Control implements Application\IPresenter
 	public function run(Application\Request $request)
 	{
 		try {
-			// STARTUP
+			// RESTORE REQUEST
 			$this->request = $request;
+			if (isset($request->parameters[self::REQUEST_KEY])) {
+				$storedRequest = $this->getStoredRequest($request->parameters[self::REQUEST_KEY]);
+				if ($storedRequest) {
+					$this->request = $storedRequest;
+				}
+			}
+
+			// STARTUP
 			$this->payload = new \stdClass;
 			$this->setParent($this->getParent(), $request->getPresenterName());
 
@@ -1081,23 +1090,46 @@ abstract class Presenter extends Control implements Application\IPresenter
 
 
 	/**
+	 * Loads stored request from session.
+	 * @param  string key
+	 * @return \Nette\Application\Request|NULL
+	 */
+	public function getStoredRequest($key)
+	{
+		$session = $this->session->getSection('Nette.Application/requests');
+		if (!isset($session[$key]) || ($session[$key][0] !== NULL && $session[$key][0] !== $this->user->getId())) {
+			return NULL;
+		}
+		$request = clone $session[$key][1];
+
+		$params = $request->getParameters();
+
+		if ($request->getPresenterName() !== $this->request->getPresenterName()) {
+			$params[self::REQUEST_KEY] = $key;
+			$action = $params[self::ACTION_KEY];
+			unset($params[self::ACTION_KEY]);
+			$this->redirect(":$request->presenterName:$action", $params);
+		}
+
+		$request->setFlag(Application\Request::RESTORED, TRUE);
+		$params[self::FLASH_KEY] = $this->getParameter(self::FLASH_KEY);
+		$request->setParameters($params);
+
+		return $request;
+	}
+
+
+	/**
 	 * Restores request from session.
 	 * @param  string key
 	 * @return void
 	 */
 	public function restoreRequest($key)
 	{
-		$session = $this->session->getSection('Nette.Application/requests');
-		if (!isset($session[$key]) || ($session[$key][0] !== NULL && $session[$key][0] !== $this->user->getId())) {
-			return;
+		$request = $this->getStoredRequest($key);
+		if ($request) {
+			$this->sendResponse(new Responses\ForwardResponse($request));
 		}
-		$request = clone $session[$key][1];
-		unset($session[$key]);
-		$request->setFlag(Application\Request::RESTORED, TRUE);
-		$params = $request->getParameters();
-		$params[self::FLASH_KEY] = $this->getParameter(self::FLASH_KEY);
-		$request->setParameters($params);
-		$this->sendResponse(new Responses\ForwardResponse($request));
 	}
 
 
